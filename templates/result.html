@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>스캔 결과 보고서</title>
+
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Pretendard -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css">
+
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Pretendard', sans-serif;
+        }
+        .container {
+            max-width: 720px;
+            margin-top: 60px;
+        }
+        .card {
+            background-color: #1f1f1f;
+            border: none;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+        }
+        .card-header, .card-footer {
+            background-color: #2c2c2c;
+            border-color: #333;
+            border-radius: 12px 12px 0 0;
+        }
+        .card-header h4 {
+            font-weight: 600;
+            font-size: 1.4rem;
+            color: #ffffff;
+        }
+        .card-body {
+            color: #d0d0d0;
+        }
+        .protocol-entry {
+            background-color: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 10px;
+            padding: 12px 16px;
+            margin-bottom: 12px;
+        }
+        .protocol-entry.open { border-left: 5px solid #00e676; }
+        .protocol-entry.closed { border-left: 5px solid #ff7675; }
+        .protocol-entry.error { border-left: 5px solid #ffa726; }
+        .protocol-name {
+            font-size: 1rem;
+            font-weight: bold;
+        }
+        .protocol-port {
+            font-size: 0.9rem;
+            color: #999;
+        }
+        .protocol-msg {
+            font-size: 0.9rem;
+            margin-top: 4px;
+            color: #ccc;
+        }
+        .vuln-warning {
+            color: #ff7675;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        .btn-back, .btn-download {
+            background-color: #00b894;
+            color: #fff;
+            font-weight: bold;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            margin: 8px;
+            transition: all 0.2s ease-in-out;
+        }
+        .btn-back:hover, .btn-download:hover {
+            background-color: #019874;
+            transform: scale(1.03);
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <div class="card-header text-center">
+            <h4>🔐 {{ result.ip }}에 대한 스캔 보고서</h4>
+        </div>
+        <div class="card-body">
+            <div class="mb-4">
+                <h5 class="text-info">📌 대상 정보</h5>
+                <p><strong>IP / 도메인:</strong> {{ result.ip }}</p>
+                <p><strong>스캔 포트 범위:</strong> 1–1024 또는 선택한 프로토콜</p>
+                <p><strong>스캔 시간:</strong> {{ result.scan_time }}초</p>
+            </div>
+
+            {% if result.warnings %}
+            <div class="alert alert-warning">
+                <ul class="mb-0">
+                    {% for warning in result.warnings %}
+                    <li>{{ warning }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <h5 class="text-success mb-3">🔎 포트 스캔 결과</h5>
+            {% for entry in result.results|sort(attribute='status', reverse=True) %}
+            <div class="protocol-entry {{ entry.status }}">
+                <div class="protocol-name">
+                    📡 {{ entry.protocol|upper if entry.protocol else '포트' }}
+                </div>
+                <div class="protocol-port">
+                    포트 {{ entry.port }} — 
+                    {% if entry.status == 'open' %}<span style="color: #00e676">열림</span>
+                    {% elif entry.status == 'closed' %}<span style="color: #ff7675">닫힘</span>
+                    {% else %}<span style="color: #ffa726">오류</span>{% endif %}
+                </div>
+                {% if entry.vuln_warning %}
+                <div class="vuln-warning">⚠️ 위험: {{ entry.vuln_warning }}</div>
+                {% endif %}
+                {% if entry.banner %}
+                <div class="protocol-msg">💬 배너: {{ entry.banner }}</div>
+                {% endif %}
+                {% if entry.response %}
+                <div class="protocol-msg">📥 응답: {{ entry.response }}</div>
+                {% endif %}
+                {% if entry.message %}
+                <div class="protocol-msg">⚠️ 메시지: {{ entry.message }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="card-footer text-center">
+            <a href="/" class="btn btn-back">← 다시 스캔하기</a>
+            <a href="/download" class="btn btn-download">📄 결과 다운로드</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>

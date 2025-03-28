@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>포트 스캐너</title>
+
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Pretendard -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css">
+
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Pretendard', sans-serif;
+        }
+        .container {
+            max-width: 600px;
+            margin-top: 60px;
+        }
+        .card {
+            background-color: #1f1f1f;
+            border: none;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+        }
+        .card-header {
+            background-color: #2c2c2c;
+            border-bottom: 1px solid #333;
+        }
+        .card-header h3 {
+            font-weight: 600;
+            font-size: 1.6rem;
+            color: #fff;
+        }
+        .form-label {
+            color: #eaeaea;
+        }
+        .form-control, .form-check-input {
+            background-color: #2b2b2b;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 10px;
+        }
+        .form-control::placeholder {
+            color: #bbb;
+        }
+        .form-control:focus {
+            border-color: #00b894;
+            box-shadow: 0 0 0 0.2rem rgba(0, 184, 148, 0.25);
+        }
+        .form-text {
+            color: #ccc;
+        }
+        .btn-primary, .btn-secondary {
+            background-color: #00b894;
+            color: #fff;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+        }
+        .btn-primary:hover, .btn-secondary:hover {
+            background-color: #019874;
+        }
+        .card-footer {
+            background-color: #2c2c2c;
+            border-top: 1px solid #333;
+            color: #aaa;
+            border-radius: 0 0 12px 12px;
+        }
+        .form-check-label {
+            margin-left: 0.5rem;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <div class="card-header text-center">
+            <h3>🔍 포트 스캐너</h3>
+        </div>
+        <div class="card-body">
+            <p class="mb-3">
+                스캔할 IP 주소 또는 도메인을 입력하세요 (포트 범위: 1–1024)<br>
+                <strong style="color: #ff7675;">※ 허가받은 시스템만 스캔하세요.</strong>
+            </p>
+            {% if error %}
+            <div class="alert alert-danger">{{ error }}</div>
+            {% endif %}
+            <form method="POST" action="/scan">
+                <div class="mb-3">
+                    <label for="target" class="form-label">대상 IP / 도메인</label>
+                    <input type="text" class="form-control" id="target" name="target" placeholder="예: 192.168.0.1 또는 example.com" required>
+                    <div class="form-text">예시: 192.168.1.1 또는 google.com</div>
+                </div>
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary">기본 포트 스캔</button>
+                </div>
+            </form>
+
+            <form method="POST" action="/fullscan" class="mt-3">
+                <input type="hidden" name="target" id="fullscan-target">
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-secondary">프로토콜 기반 전체 스캔</button>
+                </div>
+            </form>
+
+            <form method="POST" action="/customscan" class="mt-4">
+                <input type="hidden" name="target" id="customscan-target">
+                <label class="form-label">검사할 프로토콜을 선택하세요:</label>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="select-all">
+                    <label class="form-check-label" for="select-all">전체 선택 / 해제</label>
+                </div>
+                <div class="row row-cols-2">
+                    {% for protocol in [
+                        'ftp', 'ssh', 'telnet', 'smtp', 'dns', 'http', 'pop3', 'ntp',
+                        'imap', 'snmp', 'ldap', 'https', 'smb', 'mysql', 'rdp'] %}
+                    <div class="form-check col">
+                        <input class="form-check-input protocol-checkbox" type="checkbox" name="protocols" value="{{ protocol }}" id="{{ protocol }}">
+                        <label class="form-check-label" for="{{ protocol }}">{{ protocol|upper }}</label>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="d-grid mt-3">
+                    <button type="submit" class="btn btn-secondary">선택된 프로토콜만 스캔</button>
+                </div>
+            </form>
+
+            <!-- 로딩 애니메이션 -->
+            <div id="loading" class="text-center mt-4" style="display: none;">
+                <div class="spinner-border text-success" role="status"></div>
+                <p class="mt-2">스캔 중입니다... 잠시만 기다려 주세요.</p>
+            </div>
+        </div>
+        <div class="card-footer text-center">
+            <small>이 도구는 보안 교육 또는 사전 허가된 테스트 목적으로만 사용하십시오.</small>
+        </div>
+    </div>
+</div>
+
+<script>
+    const forms = document.querySelectorAll("form");
+    const loading = document.getElementById("loading");
+    forms.forEach(form => {
+        form.addEventListener("submit", function () {
+            loading.style.display = "block";
+            const targetInput = document.getElementById("target");
+            if (targetInput) {
+                const ip = targetInput.value;
+                document.getElementById("fullscan-target").value = ip;
+                document.getElementById("customscan-target").value = ip;
+            }
+        });
+    });
+
+    // 전체 선택 체크박스 기능
+    const selectAll = document.getElementById("select-all");
+    const protocolCheckboxes = document.querySelectorAll(".protocol-checkbox");
+    selectAll.addEventListener("change", function () {
+        protocolCheckboxes.forEach(cb => cb.checked = selectAll.checked);
+    });
+</script>
+</body>
+</html>
