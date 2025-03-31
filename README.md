@@ -31,7 +31,6 @@
 
 | 📊 전체 리포트 | 🌐 웹 서비스 스크린샷 |
 |----------------|------------------------|
-| ![report](./screenshots/report1.png) | ![webshot](./screenshots/web1.png) |
 
 > 🔐 리포트 예시: "Redis 인증 없이 접속 가능합니다. 즉시 차단 필요"
 
