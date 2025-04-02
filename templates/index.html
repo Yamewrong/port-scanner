@@ -84,7 +84,7 @@
         </div>
         <div class="card-body">
             <p class="mb-3">
-                스캔할 IP 주소 또는 도메인을 입력하세요 (포트 범위: 1–1024)<br>
+                스캔할 IP 주소 또는 도메인을 입력하세요 (포트 범위: 1–1024 또는 선택한 프로토콜)<br>
                 <strong style="color: #ff7675;">※ 허가받은 시스템만 스캔하세요.</strong>
             </p>
             {% if error %}
@@ -118,7 +118,10 @@
                 <div class="row row-cols-2">
                     {% for protocol in [
                         'ftp', 'ssh', 'telnet', 'smtp', 'dns', 'http', 'pop3', 'ntp',
-                        'imap', 'snmp', 'ldap', 'https', 'smb', 'mysql', 'rdp'] %}
+                        'imap', 'snmp', 'ldap', 'https', 'smb', 'mysql', 'rdp',
+                        'kubernetes', 'docker', 'etcd', 'consul', 'jenkins', 'gitlab',
+                        'vnc', 'tftp', 'netbios', 'redis', 'mongodb', 'postgresql',
+                        'oracle', 'elasticsearch', 'zookeeper'] %}
                     <div class="form-check col">
                         <input class="form-check-input protocol-checkbox" type="checkbox" name="protocols" value="{{ protocol }}" id="{{ protocol }}">
                         <label class="form-check-label" for="{{ protocol }}">{{ protocol|upper }}</label>
@@ -157,7 +160,6 @@
         });
     });
 
-    // 전체 선택 체크박스 기능
     const selectAll = document.getElementById("select-all");
     const protocolCheckboxes = document.querySelectorAll(".protocol-checkbox");
     selectAll.addEventListener("change", function () {
