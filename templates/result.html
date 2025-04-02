@@ -68,7 +68,7 @@
 
             {% if result.cve_warnings %}
             <div class="mb-4 p-3" style="background-color: #2e1f1f; border-left: 6px solid #ff5252; border-radius: 10px;">
-                <h5 style="color: #ff5252; font-weight: bold;">🧨 CVE 취약점 경고 (EPSS ≥ 0.7)</h5>
+                <h5 style="color: #ff5252; font-weight: bold;">🧨 CVE 취약점 경고 (EPSS 스코어 포함)</h5>
                 <ul class="mb-0">
                     {% for cve in result.cve_warnings %}
                     <li style="margin-bottom: 6px;">{{ cve }}</li>

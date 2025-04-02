@@ -116,12 +116,13 @@
                     <label class="form-check-label" for="select-all">전체 선택 / 해제</label>
                 </div>
                 <div class="row row-cols-2">
-                    {% for protocol in [
+                    {% set protocols = [
                         'ftp', 'ssh', 'telnet', 'smtp', 'dns', 'http', 'pop3', 'ntp',
                         'imap', 'snmp', 'ldap', 'https', 'smb', 'mysql', 'rdp',
                         'kubernetes', 'docker', 'etcd', 'consul', 'jenkins', 'gitlab',
                         'vnc', 'tftp', 'netbios', 'redis', 'mongodb', 'postgresql',
                         'oracle', 'elasticsearch', 'zookeeper'] %}
+                    {% for protocol in protocols %}
                     <div class="form-check col">
                         <input class="form-check-input protocol-checkbox" type="checkbox" name="protocols" value="{{ protocol }}" id="{{ protocol }}">
                         <label class="form-check-label" for="{{ protocol }}">{{ protocol|upper }}</label>

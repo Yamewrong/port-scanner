@@ -27,13 +27,30 @@ HIGH_RISK_PORTS = {
     139: "NetBIOS - 내부 공유 노출 가능"
 }
 
+EXTERNAL_RISK_PORTS = {
+    3306: "MySQL",
+    5432: "PostgreSQL",
+    27017: "MongoDB",
+    6379: "Redis",
+    445: "SMB",
+    139: "NetBIOS",
+    3389: "RDP",
+    23: "Telnet",
+    21: "FTP"
+}
+
+def resolve_domain(target):
+    try:
+        return socket.gethostbyname(target)
+    except:
+        return None
+
 def get_shodan_cves(ip):
     try:
         url = f"https://api.shodan.io/shodan/host/{ip}?key={SHODAN_API_KEY}"
         response = requests.get(url)
         data = response.json()
-        cves = data.get('vulns', [])
-        return list(cves)
+        return list(data.get('vulns', []))
     except:
         return []
 
@@ -48,145 +65,135 @@ def get_epss_score(cve_id):
     except:
         return 0.0
 
-def run_nuclei_scan(ip):
-    url = f"http://{ip}"
-    try:
-        result = subprocess.run(
-            ['nuclei', '-u', url, '-t', 'cves/', '-silent'],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        output = result.stdout.strip().splitlines()
-        cve_ids = [line for line in output if line.startswith('CVE-')]
-        return cve_ids
-    except Exception as e:
-        return []
+def run_nuclei_scan(ip, open_ports):
+    cve_results = []
 
-def analyze_cve_risks(ip):
-    cve_warnings = []
-    
-    # Shodan 기반 CVE 가져오기
-    cves = get_shodan_cves(ip)
+    for port in open_ports:
+        url = f"http://{ip}:{port}"
+        cmd = [
+            "C:\\Users\\susud\\scoop\\apps\\nuclei\\current\\nuclei.exe",
+            "-u", url,
+            "-t", "C:\\Users\\susud\\nuclei-templates",
+            "-tags", "cve",
+            "-silent"
+        ]
 
-    # Nuclei 기반 CVE 추가
-    nuclei_cves = run_nuclei_scan(ip)
-    cves += nuclei_cves
-    cves = list(set(cves))  # 중복 제거
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            output = result.stdout.strip().splitlines()
 
-    high_risk_cves = []
-    for cve in cves:
-        if not cve.startswith("CVE-"):  # 방어적 필터링
-            continue
-        score = get_epss_score(cve)
-        if score >= 0.7:
-            high_risk_cves.append((cve, score))
+            print(f"[DEBUG] Executing nuclei for {url}")
+            print("[DEBUG nuclei output]:", output)
 
-    for cve, score in high_risk_cves:
-        cve_warnings.append(f"🚨 고위험 CVE 발견: {cve} (EPSS: {score:.2f}) → 즉각적인 조치 필요")
+            for line in output:
+                if "CVE-" in line:
+                    cve_results.append(line)
 
-    return cve_warnings
+        except subprocess.TimeoutExpired:
+            print(f"[ERROR] Nuclei timeout for {url}")
+        except Exception as e:
+            print(f"[ERROR] Nuclei failed for {url}: {e}")
+
+    return list(set(cve_results))
+
+
+
+
+
+def analyze_cve_risks(ip, open_ports):
+    print(f"[DEBUG] Running CVE analysis for {ip}:{open_ports}")
+    raw_results = run_nuclei_scan(ip, open_ports)
+    print("[DEBUG] Discovered CVEs (raw):", raw_results)
+
+    analyzed = []
+    for line in raw_results:
+        if "CVE-" in line:
+            cve_id = extract_cve_id(line)
+            epss = get_epss_score(cve_id)
+            if epss >= 0.7:
+                severity = "🟥 고위험"
+            elif epss >= 0.4:
+                severity = "🟧 중간위험"
+            else:
+                severity = "🟨 저위험"
+            analyzed.append(f"{severity} | {cve_id} (EPSS: {epss:.2f})")
+        else:
+            analyzed.append(f"ℹ️ Info: {line}")
+
+    print("[DEBUG] Final CVE Warnings:", analyzed)
+    return analyzed
+
+
+def extract_cve_id(text):
+    import re
+    match = re.search(r"CVE-\d{4}-\d{4,7}", text)
+    return match.group(0) if match else "CVE-Unknown"
+
+
+
 
 def check_port(ip, port):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(1)
-            result = s.connect_ex((ip, port))
-            if result == 0:
-                return {'port': port, 'status': 'open'}
-            else:
-                return {'port': port, 'status': 'closed'}
+            return {'port': port, 'status': 'open' if s.connect_ex((ip, port)) == 0 else 'closed'}
     except Exception as e:
         return {'port': port, 'status': 'error', 'message': str(e)}
 
 def analyze_risks(open_ports):
     warnings = []
-
-    # 기존 경고
-    if 443 in open_ports and len(open_ports) > 1:
-        warnings.append("⚠ HTTPS 외 포트가 함께 열려 있습니다. 최소 오픈 정책을 확인하세요.")
-
     db_ports = {3306, 1433, 5432, 1521}
     exposed_db = [port for port in open_ports if port in db_ports]
-    if exposed_db:
-        warnings.append(f"⚠ 외부에 DB 포트가 열려 있습니다: {', '.join(map(str, exposed_db))}")
 
-    # 심화 조합 탐지 로직
+    if 443 in open_ports and len(open_ports) > 1:
+        warnings.append("⚠ HTTPS 외 포트가 함께 열려 있습니다. 최소 오픈 정책을 확인하세요.")
     if 80 in open_ports and 443 in open_ports:
         warnings.append("⚠ HTTP와 HTTPS가 모두 열려 있습니다. HTTP 접근 차단을 고려하세요.")
-
     if 21 in open_ports and 445 in open_ports:
         warnings.append("⚠ FTP와 SMB가 동시에 열려 있습니다. 내부 파일 유출 가능성이 있습니다.")
-
     if len(exposed_db) >= 2:
         warnings.append("🚨 다중 DB 포트가 동시에 열려 있습니다. 보안 리스크가 큽니다!")
-
     if 6379 in open_ports or 27017 in open_ports:
         warnings.append("⚠ Redis 또는 MongoDB가 열려 있습니다. 인증 미설정 여부 확인 필요.")
 
+    if exposed_db:
+        warnings.append(f"⚠ 외부에 DB 포트가 열려 있습니다: {', '.join(map(str, exposed_db))}")
+
     return warnings
-EXTERNAL_RISK_PORTS = {
-    3306: "MySQL",
-    5432: "PostgreSQL",
-    27017: "MongoDB",
-    6379: "Redis",
-    445: "SMB",
-    139: "NetBIOS",
-    3389: "RDP",
-    23: "Telnet",
-    21: "FTP"
-}
-
-def detect_asset_exposure(open_ports):
-    messages = []
-    for port in open_ports:
-        if port in EXTERNAL_RISK_PORTS:
-            messages.append(
-                f"🔓 외부에서 {EXTERNAL_RISK_PORTS[port]} 포트({port})가 열려 있습니다. 민감 자산 노출 위험이 있습니다."
-            )
-    return messages
-
 
 def analyze_vulnerabilities(results):
     for r in results:
         if r['status'] == 'open' and r['port'] in HIGH_RISK_PORTS:
             r['vuln_warning'] = HIGH_RISK_PORTS[r['port']]
+
+def detect_asset_exposure(open_ports):
+    return [f"\U0001F513 외부에서 {EXTERNAL_RISK_PORTS[p]} 포트({p})가 열려 있습니다. 민감 자산 노출 위험이 있습니다."
+            for p in open_ports if p in EXTERNAL_RISK_PORTS]
+
 def detect_unauthorized_access(ip, open_ports):
     warnings = []
-
-    # Redis 테스트
     if 6379 in open_ports:
         try:
             s = socket.create_connection((ip, 6379), timeout=2)
             s.sendall(b'PING\r\n')
-            response = s.recv(1024)
-            if b'PONG' in response:
-                warnings.append("🚨 Redis 인증 없이 접속 가능합니다. 즉시 차단 또는 보안 설정이 필요합니다.")
+            if b'PONG' in s.recv(1024):
+                warnings.append("\U0001F6A8 Redis 인증 없이 접속 가능합니다. 즉시 차단 또는 보안 설정이 필요합니다.")
             s.close()
-        except:
-            pass
-
-    # MongoDB 테스트
+        except: pass
     if 27017 in open_ports:
         try:
             s = socket.create_connection((ip, 27017), timeout=2)
             s.sendall(b'\x3a\x00\x00\x00\x3a\x00\x00\x00\x00\x00\x00\x00\xd4\x07\x00\x00isMaster\x00\x00')
-            response = s.recv(1024)
-            if b'ok' in response:
-                warnings.append("🚨 MongoDB 인증 없이 외부 접속이 가능합니다.")
+            if b'ok' in s.recv(1024):
+                warnings.append("\U0001F6A8 MongoDB 인증 없이 외부 접속이 가능합니다.")
             s.close()
-        except:
-            pass
-
-    # Elasticsearch 테스트
+        except: pass
     if 9200 in open_ports:
         try:
             res = requests.get(f"http://{ip}:9200", timeout=2)
             if res.status_code == 200 and "cluster_name" in res.text:
-                warnings.append("🚨 Elasticsearch가 인증 없이 노출되어 있습니다.")
-        except:
-            pass
-
+                warnings.append("\U0001F6A8 Elasticsearch가 인증 없이 노출되어 있습니다.")
+        except: pass
     return warnings
 
 @app.route('/')
@@ -196,8 +203,9 @@ def index():
 @app.route('/scan', methods=['POST'])
 def scan():
     target = request.form.get('target', '').strip()
-    if not target:
-        return render_template('index.html', error="대상 IP 또는 도메인을 입력하세요.")
+    ip = resolve_domain(target)
+    if not ip:
+        return render_template('index.html', error="도메인 또는 IP를 확인할 수 없습니다.")
 
     ports = range(1, 1025)
     open_ports = []
@@ -206,7 +214,7 @@ def scan():
 
     try:
         with ThreadPoolExecutor(max_workers=100) as executor:
-            future_to_port = {executor.submit(check_port, target, port): port for port in ports}
+            future_to_port = {executor.submit(check_port, ip, port): port for port in ports}
             for future in as_completed(future_to_port):
                 result = future.result()
                 scan_results.append(result)
@@ -214,94 +222,23 @@ def scan():
                     open_ports.append(result['port'])
     except Exception as e:
         return render_template('index.html', error=str(e))
-
     scan_time = round(time.time() - start_time, 2)
     scan_results.sort(key=lambda x: x['port'])
     analyze_vulnerabilities(scan_results)
     warnings = analyze_risks(open_ports)
-    cve_warnings = analyze_cve_risks(target)
+    cve_warnings = analyze_cve_risks(ip, open_ports)
     warnings += cve_warnings
+    warnings += detect_asset_exposure(open_ports)
+    warnings += detect_unauthorized_access(ip, open_ports)
     web_infos = capture_web_info(target)
-    exposure_warnings = detect_asset_exposure(open_ports)
-    warnings += cve_warnings + exposure_warnings
-    unauth_warnings = detect_unauthorized_access(target, open_ports)
-    warnings += unauth_warnings
-
-
 
     global last_scan_result
     last_scan_result = {
-        'ip': target,
+        'ip': ip,
+        'hostname': target,
         'ports': open_ports,
         'scan_time': scan_time,
         'results': scan_results,
-        'warnings': warnings,
-        'cve_warnings': cve_warnings,
-        'web_infos': web_infos
-    }
-
-    return render_template('result.html', result=last_scan_result)
-
-@app.route('/fullscan', methods=['POST'])
-def full_scan():
-    target = request.form.get('target', '').strip()
-    if not target:
-        return render_template('index.html', error="대상 IP를 입력하세요.")
-
-    scan_functions = [
-        ajs.scan_ftp,
-        ajs.scan_ssh,
-        ajs.scan_http,
-        ajs.scan_https,
-        ajs.scan_dns,
-
-        sol.pop3_port_scan,
-        sol.imap_port_scan,
-        sol.ntp_port_scan,
-        sol.snmp_port_scan,
-        sol.ldap_port_scan,
-        sol.smb_port_scan,
-        sol.mysql_port_scan,
-        sol.rdp_port_scan,
-
-        my.scan_kubernetes,
-        my.scan_docker,
-        my.scan_etcd,
-        my.scan_consul,
-        my.scan_jenkins,
-        my.scan_gitlab,
-        my.scan_vnc,
-        my.scan_tftp,
-
-        cj.netbios_port_scan,
-        cj.redis_port_scan,
-        cj.mongodb_port_scan,
-        cj.postgresql_port_scan,
-        cj.oracle_port_scan,
-        cj.elasticsearch_port_scan,
-        cj.zookeeper_port_scan,
-    ]
-
-    start_time = time.time()
-    results = [func(ip) for func in scan_functions]
-    scan_time = round(time.time() - start_time, 2)
-    open_ports = [r['port'] for r in results if r['status'] == 'open']
-    analyze_vulnerabilities(results)
-    warnings = analyze_risks(open_ports)
-    cve_warnings = analyze_cve_risks(target)  # 또는 ip
-    warnings += cve_warnings
-    web_infos = capture_web_info(target)
-    exposure_warnings = detect_asset_exposure(open_ports)
-    warnings += cve_warnings + exposure_warnings
-    unauth_warnings = detect_unauthorized_access(target, open_ports)
-    warnings += unauth_warnings
-
-    global last_scan_result
-    last_scan_result = {
-        'ip': target,
-        'scan_time': scan_time,
-        'results': results,
-        'ports': open_ports,
         'warnings': warnings,
         'cve_warnings': cve_warnings,
         'web_infos': web_infos
@@ -313,9 +250,14 @@ def full_scan():
 def custom_scan():
     target = request.form.get('target', '').strip()
     selected_protocols = request.form.getlist('protocols')
+    start_time = time.time()
 
     if not target or not selected_protocols:
         return render_template('index.html', error="대상 IP와 프로토콜을 선택하세요.")
+
+    ip = resolve_domain(target)
+    if not ip:
+        return render_template('index.html', error="도메인 또는 IP를 확인할 수 없습니다.")
 
     scanner_map = {
         'ftp': ajs.scan_ftp,
@@ -348,37 +290,37 @@ def custom_scan():
         'zookeeper': cj.zookeeper_port_scan
     }
 
-    start_time = time.time()
     results = []
     for proto in selected_protocols:
         func = scanner_map.get(proto)
         if func:
-            results.append(func(target))
+            results.append(func(ip))
 
-    scan_time = round(time.time() - start_time, 2)
     open_ports = [r['port'] for r in results if r['status'] == 'open']
+    scan_time = round(time.time() - start_time, 2)
+
     analyze_vulnerabilities(results)
     warnings = analyze_risks(open_ports)
-    cve_warnings = analyze_cve_risks(target)  # 또는 ip
+    cve_warnings = analyze_cve_risks(ip, open_ports)
     warnings += cve_warnings
+    warnings += detect_asset_exposure(open_ports)
+    warnings += detect_unauthorized_access(ip, open_ports)
     web_infos = capture_web_info(target)
-    exposure_warnings = detect_asset_exposure(open_ports)
-    warnings += cve_warnings + exposure_warnings
-    unauth_warnings = detect_unauthorized_access(target, open_ports)
-    warnings += unauth_warnings
 
     global last_scan_result
     last_scan_result = {
-        'ip': target,
+        'ip': ip,
+        'hostname': target,
+        'ports': open_ports,
         'scan_time': scan_time,
         'results': results,
-        'ports': open_ports,
         'warnings': warnings,
         'cve_warnings': cve_warnings,
         'web_infos': web_infos
     }
 
     return render_template('result.html', result=last_scan_result)
+
 
 @app.route('/download')
 def download():
@@ -389,10 +331,10 @@ def download():
     scan_time = last_scan_result.get('scan_time', 0)
     results = last_scan_result.get('results', [])
 
-    content = f"📄 포트 스캔 보고서\n대상: {ip}\n소요 시간: {scan_time}초\n\n결과:\n"
+    content = f"\U0001F4C4 포트 스캔 보고서\n대상 IP: {ip}\n소요 시간: {scan_time}초\n\n결과:\n"
     for r in results:
-        status_text = "열림" if r['status'] == 'open' else "닫힌" if r['status'] == 'closed' else f"오류: {r.get('message', '')}"
-        content += f"- {r.get('protocol', '')} (포트 {r['port']}): {status_text}\n"
+        status_text = "열림" if r['status'] == 'open' else "닫힘" if r['status'] == 'closed' else f"오류: {r.get('message', '')}"
+        content += f"- 포트 {r['port']}: {status_text}\n"
         if 'vuln_warning' in r:
             content += f"  >> 위협: {r['vuln_warning']}\n"
 
