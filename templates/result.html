@@ -127,8 +127,29 @@
                 {% if entry.message %}
                 <div class="protocol-msg">⚠️ 오류 메시지: {{ entry.message }}</div>
                 {% endif %}
+
+                {% if entry.docker_image %}
+                <div class="protocol-msg">
+                    🐳 <strong>Docker 이미지:</strong> {{ entry.docker_image }}
+                </div>
+                {% endif %}
+
+                {% if entry.trivy_vulns %}
+                <div class="protocol-msg" style="margin-top: 8px;">
+                    🛡️ <strong>Trivy 취약점 발견됨:</strong> {{ entry.trivy_vulns|length }}개
+                    <br>
+                    {% if entry.docker_image %}
+                    <a href="/docker_vulns/{{ entry.docker_image }}" target="_blank" 
+                    class="btn btn-sm btn-outline-info mt-2">
+                        🔎 {{ entry.docker_image }} 상세 페이지에서 보기 →
+                    </a>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
             {% endfor %}
+
+
         </div>
         <div class="card-footer text-center">
             <a href="/" class="btn btn-back">← 다시 스캔하기</a>

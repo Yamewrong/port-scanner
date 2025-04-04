@@ -2,6 +2,9 @@ from flask import Flask, render_template, request, send_file
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from screenshot_utils import capture_web_info
+from docker_helper import get_docker_port_image_map
+from trivy_helper import scan_with_trivy
+
 import requests
 import io
 import time
@@ -200,6 +203,26 @@ def detect_unauthorized_access(ip, open_ports):
 def index():
     return render_template('index.html')
 
+def enrich_with_trivy(ip, results):
+    docker_map = get_docker_port_image_map()
+    for r in results:
+        port = r['port']
+        if port in docker_map:
+            image_name = docker_map[port]
+            print(f"[DEBUG] 포트 {port} → Docker 이미지: {image_name}")
+            r['docker_image'] = image_name
+            try:
+                r['trivy_vulns'] = scan_with_trivy(image_name)
+                docker_vuln_results[image_name] = r['trivy_vulns']  # 상세 페이지용 저장
+            except Exception as e:
+                print(f"[ERROR] Trivy 실행 실패: {e}")
+                r['trivy_vulns'] = []
+        else:
+            print(f"[DEBUG] 포트 {port} → Docker 매핑 없음")
+
+
+
+
 @app.route('/scan', methods=['POST'])
 def scan():
     target = request.form.get('target', '').strip()
@@ -243,6 +266,7 @@ def scan():
         'cve_warnings': cve_warnings,
         'web_infos': web_infos
     }
+    enrich_with_trivy(ip, scan_results)
 
     return render_template('result.html', result=last_scan_result)
 
@@ -318,8 +342,40 @@ def custom_scan():
         'cve_warnings': cve_warnings,
         'web_infos': web_infos
     }
-
+    enrich_with_trivy(ip, results)
     return render_template('result.html', result=last_scan_result)
+# 전역 저장소
+docker_vuln_results = {}
+
+@app.route('/docker_vulns/<image>')
+def docker_vulns(image):
+    vulns = docker_vuln_results.get(image)
+    if not vulns:
+        return render_template('404.html', msg='해당 이미지에 대한 취약점 정보가 없습니다.')
+
+    # 필터 처리
+    severity = request.args.get('severity')
+    if severity:
+        vulns = [v for v in vulns if v['Severity'].lower() == severity.lower()]
+
+    # 페이지네이션 처리
+    page = int(request.args.get('page', 1))
+    per_page = 10
+    total_pages = (len(vulns) + per_page - 1) // per_page
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_vulns = vulns[start:end]
+
+    return render_template(
+        'docker_vulns.html',
+        image=image,
+        vulns=paginated_vulns,
+        page=page,
+        total_pages=total_pages,
+        severity=severity
+    )
+
+
 
 
 @app.route('/download')
@@ -342,6 +398,7 @@ def download():
     buffer.write(content.encode('utf-8'))
     buffer.seek(0)
     return send_file(buffer, mimetype='text/plain', as_attachment=True, download_name='scan_report.txt')
+
 
 if __name__ == '__main__':
     app.run(debug=True)
