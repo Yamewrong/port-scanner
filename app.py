@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from screenshot_utils import capture_web_info
 from docker_helper import get_docker_port_image_map
 from trivy_helper import scan_with_trivy
+import re
 
 import requests
 import io
@@ -126,12 +127,20 @@ def analyze_cve_risks(ip, open_ports):
     print("[DEBUG] Final CVE Warnings:", analyzed)
     return analyzed
 
+def extract_cve_id(line):
+    # ANSI 이스케이프 코드 제거
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    clean_line = ansi_escape.sub('', line)
 
-def extract_cve_id(text):
-    import re
-    match = re.search(r"CVE-\d{4}-\d{4,7}", text)
-    return match.group(0) if match else "CVE-Unknown"
+    # CVE ID 정규식 추출
+    match = re.search(r'CVE-\d{4}-\d{4,7}', clean_line)
+    return match.group(0) if match else "UNKNOWN"
 
+def remove_ansi(text):
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
+def sanitize_cve_lines(cve_lines):
+    return [remove_ansi(line) for line in cve_lines]
 
 
 
@@ -220,6 +229,75 @@ def enrich_with_trivy(ip, results):
         else:
             print(f"[DEBUG] 포트 {port} → Docker 매핑 없음")
 
+def generate_guideline(vuln):
+    pkg = vuln.get("PkgName")
+    installed = vuln.get("InstalledVersion", "알 수 없음")
+    fixed = vuln.get("FixedVersion")
+    cve_id = vuln.get("VulnerabilityID")
+
+    if not pkg:
+        return ""
+
+    if fixed:
+        return f"""🔐 보안 가이드라인:
+이 취약점은 `{pkg}` 패키지의 구버전({installed})에서 발생합니다.  
+💡 해결 방법: `{pkg}`를 최신 버전({fixed} 이상)으로 업데이트하세요.  
+🛠 리눅스에서는 아래 명령어로 간단히 업데이트할 수 있습니다:  
+<code>$ sudo apt update && sudo apt install {pkg}</code>"""
+    else:
+        return f"""🔐 보안 가이드라인:
+이 취약점은 `{pkg}` 패키지에서 발생하지만, 수정 버전 정보가 없습니다.  
+🔒 해당 시스템에 대한 접근을 제한하거나, 네트워크에서 차단하세요.  
+📚 자세한 내용은 NVD 페이지({vuln.get("PrimaryURL", "https://nvd.nist.gov")})를 참고하세요."""
+
+def extract_cve_id(line):
+    # ANSI 이스케이프 코드 제거 (보강된 버전)
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    clean_line = ansi_escape.sub('', line)
+
+    # 완전히 깔끔해졌는지 디버깅
+    print("[DEBUG] clean_line after ANSI strip:", clean_line)
+
+    # CVE ID 정규식 추출
+    match = re.search(r'CVE-\d{4}-\d{4,7}', clean_line)
+    return match.group(0) if match else "UNKNOWN"
+
+
+def generate_cve_guidelines(cve_lines):
+    guidelines = {}
+    print("[DEBUG] cve_lines:", cve_lines)
+    for raw_line in cve_lines:
+        line = remove_ansi(raw_line)  # 💥 ANSI 색상 제거 추가
+        cve_id = extract_cve_id(line)
+        print("[DEBUG] Extracted CVE from line:", cve_id)
+        if cve_id == "UNKNOWN":
+            continue
+
+        if "12615" in cve_id:
+            guide = generate_guideline({
+                "VulnerabilityID": cve_id,
+                "PkgName": "tomcat8",
+                "InstalledVersion": "8.5.15",
+                "FixedVersion": "8.5.16",
+                "PrimaryURL": f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+            })
+        elif "45428" in cve_id:
+            guide = generate_guideline({
+                "VulnerabilityID": cve_id,
+                "PkgName": "tomcat9",
+                "InstalledVersion": "9.0.44",
+                "FixedVersion": "9.0.45",
+                "PrimaryURL": f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+            })
+        else:
+            guide = generate_guideline({
+                "VulnerabilityID": cve_id,
+                "PkgName": "알 수 없음",
+                "PrimaryURL": f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+            })
+
+        guidelines[line] = guide
+    return guidelines
 
 
 
@@ -234,6 +312,7 @@ def scan():
     open_ports = []
     scan_results = []
     start_time = time.time()
+    scan_time = 0
 
     try:
         with ThreadPoolExecutor(max_workers=100) as executor:
@@ -245,16 +324,27 @@ def scan():
                     open_ports.append(result['port'])
     except Exception as e:
         return render_template('index.html', error=str(e))
-    scan_time = round(time.time() - start_time, 2)
     scan_results.sort(key=lambda x: x['port'])
     analyze_vulnerabilities(scan_results)
     warnings = analyze_risks(open_ports)
-    cve_warnings = analyze_cve_risks(ip, open_ports)
+
+    try:
+        cve_warnings = analyze_cve_risks(ip, open_ports)
+    except Exception as e:
+        print(f"[ERROR] CVE 분석 실패: {e}")
+        cve_warnings = []
+
+    try:
+        clean_cve_warnings = sanitize_cve_lines(cve_warnings)
+        cve_guidelines = generate_cve_guidelines(clean_cve_warnings)
+    except Exception as e:
+        print(f"[ERROR] 가이드라인 생성 실패: {e}")
+        cve_guidelines = {}
+
     warnings += cve_warnings
     warnings += detect_asset_exposure(open_ports)
     warnings += detect_unauthorized_access(ip, open_ports)
     web_infos = capture_web_info(target)
-
     global last_scan_result
     last_scan_result = {
         'ip': ip,
@@ -264,6 +354,7 @@ def scan():
         'results': scan_results,
         'warnings': warnings,
         'cve_warnings': cve_warnings,
+        'cve_guidelines': cve_guidelines,
         'web_infos': web_infos
     }
     enrich_with_trivy(ip, scan_results)
@@ -330,7 +421,8 @@ def custom_scan():
     warnings += detect_asset_exposure(open_ports)
     warnings += detect_unauthorized_access(ip, open_ports)
     web_infos = capture_web_info(target)
-
+    clean_cve_warnings = sanitize_cve_lines(cve_warnings)
+    cve_guidelines = generate_cve_guidelines(clean_cve_warnings)
     global last_scan_result
     last_scan_result = {
         'ip': ip,
@@ -340,6 +432,7 @@ def custom_scan():
         'results': results,
         'warnings': warnings,
         'cve_warnings': cve_warnings,
+        'cve_guidelines': cve_guidelines,
         'web_infos': web_infos
     }
     enrich_with_trivy(ip, results)

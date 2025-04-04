@@ -76,6 +76,16 @@
                 </ul>
             </div>
             {% endif %}
+            {% if result.cve_guidelines %}
+                <h5 class="mt-4 text-warning">🛠 CVE 대응 가이드라인</h5>
+                {% for cve, guideline in result.cve_guidelines.items() %}
+                    <div class="p-3 my-2" style="background-color: #f1f1f1; color: #111; border-radius: 8px;">
+                        <strong>{{ cve }}</strong><br>
+                        <div style="white-space: pre-line;">{{ guideline }}</div>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
             {% if result.web_infos %}
             <div class="mb-4">
                 <h5 style="color:#64b5f6;">🖼️ 웹 서비스 정보</h5>
@@ -113,8 +123,20 @@
                 </div>
 
                 {% if entry.vuln_warning %}
-                <div class="vuln-warning">⚠️ 보안 경고: {{ entry.vuln_warning }}</div>
+                    <div class="vuln-warning">⚠️ 보안 경고: {{ entry.vuln_warning }}</div>
+
+                    {% if result.cve_guidelines %}
+                        {% for cve, guideline in result.cve_guidelines.items() %}
+                            {% if cve in entry.vuln_warning %}
+                                <div class="p-2 mt-2" style="background-color:#1e2b2f; border-left:5px solid #00b894; border-radius:8px;">
+                                    🛠 <strong>가이드라인:</strong><br>
+                                    <span style="white-space: pre-line;">{{ guideline }}</span>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% endif %}
                 {% endif %}
+
 
                 {% if entry.banner %}
                 <div class="protocol-msg">💬 배너 정보: {{ entry.banner }}</div>

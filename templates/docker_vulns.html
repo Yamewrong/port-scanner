@@ -35,8 +35,25 @@
             <h5>[{{ vuln.Severity }}] <a href="{{ vuln.PrimaryURL }}" target="_blank">{{ vuln.VulnerabilityID }}</a></h5>
             <p><strong>{{ vuln.Title }}</strong></p>
             <p><code>{{ vuln.PkgName }}</code> 패키지 (설치됨: {{ vuln.InstalledVersion }} / 수정됨: {{ vuln.FixedVersion or 'N/A' }})</p>
+
+            {% if vuln.Guideline %}
+            <div class="p-2 mt-2" style="
+                background-color: #f1f1f1; 
+                color: #111; 
+                border-left: 5px solid #00b894; 
+                border-radius: 8px; 
+                white-space: pre-line;
+            ">
+                🛡 <strong>보안 가이드라인:</strong><br>
+                {{ vuln.Guideline }}
+            </div>
+            {% endif %}
+
+
         </div>
     {% endfor %}
+
+
 
     <div class="d-flex justify-content-between mt-4">
         {% if page > 1 %}
