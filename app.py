@@ -362,6 +362,7 @@ def scan():
     return render_template('result.html', result=last_scan_result)
 
 @app.route('/customscan', methods=['POST'])
+@app.route('/customscan', methods=['POST'])
 def custom_scan():
     target = request.form.get('target', '').strip()
     selected_protocols = request.form.getlist('protocols')
@@ -374,6 +375,7 @@ def custom_scan():
     if not ip:
         return render_template('index.html', error="도메인 또는 IP를 확인할 수 없습니다.")
 
+    # ✅ scanner_map은 먼저 선언
     scanner_map = {
         'ftp': ajs.scan_ftp,
         'ssh': ajs.scan_ssh,
@@ -405,12 +407,20 @@ def custom_scan():
         'zookeeper': cj.zookeeper_port_scan
     }
 
+    # ✅ 결과 수집
     results = []
     for proto in selected_protocols:
         func = scanner_map.get(proto)
         if func:
-            results.append(func(ip))
+            results.append(func(ip))  # target 대신 ip 사용하면 더 일관됨
 
+    # ✅ Docker 포트 정보 추출
+    docker_ports_info = {}
+    for entry in results:
+        if 'docker_image' in entry and entry['docker_image']:
+            docker_ports_info[entry['port']] = entry['docker_image']
+
+    # ✅ 이후 분석 및 렌더링
     open_ports = [r['port'] for r in results if r['status'] == 'open']
     scan_time = round(time.time() - start_time, 2)
 
@@ -420,9 +430,11 @@ def custom_scan():
     warnings += cve_warnings
     warnings += detect_asset_exposure(open_ports)
     warnings += detect_unauthorized_access(ip, open_ports)
+
     web_infos = capture_web_info(target)
     clean_cve_warnings = sanitize_cve_lines(cve_warnings)
     cve_guidelines = generate_cve_guidelines(clean_cve_warnings)
+
     global last_scan_result
     last_scan_result = {
         'ip': ip,
@@ -433,10 +445,13 @@ def custom_scan():
         'warnings': warnings,
         'cve_warnings': cve_warnings,
         'cve_guidelines': cve_guidelines,
-        'web_infos': web_infos
+        'web_infos': web_infos,
+        'docker_ports_info': docker_ports_info   # ✅ 유지됨!
     }
+
     enrich_with_trivy(ip, results)
     return render_template('result.html', result=last_scan_result)
+
 # 전역 저장소
 docker_vuln_results = {}
 

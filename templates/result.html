@@ -173,6 +173,19 @@
 
 
         </div>
+        {% if result.docker_ports_info %}
+        <div class="mb-4">
+            <h5 style="color:#00bcd4;">🐳 Docker 포트 매핑</h5>
+            <ul class="mb-0">
+                {% for port, image in result.docker_ports_info.items() %}
+                <li>
+                    <strong>포트 {{ port }}</strong> → <code>{{ image }}</code>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
         <div class="card-footer text-center">
             <a href="/" class="btn btn-back">← 다시 스캔하기</a>
             <a href="/download" class="btn btn-download">📄 결과 다운로드</a>
