@@ -1,48 +1,79 @@
-<h1 align="center">🔍 Advanced Port & Service Scanner</h1>
-<p align="center">
-  <b>보안 전문가 수준의 자산 점검 도구</b><br>
-  <i>포트 스캔부터 민감 자산 인증 우회 탐지, CVE 취약점 경고까지 한 번에!</i>
-</p>
+# 🔍 PortScanner: 포트 기반 보안 진단 자동화 도구
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python">
-  <img src="https://img.shields.io/badge/Flask-2.x-lightgrey?logo=flask">
-  <img src="https://img.shields.io/badge/Selenium-Automation-orange?logo=selenium">
-  <img src="https://img.shields.io/badge/Docker-Redis--MongoDB-critical?logo=docker">
-</p>
+![Badge](https://img.shields.io/badge/Python-3.10-blue?style=flat-square)
+![Badge](https://img.shields.io/badge/Flask-2.2-lightgrey?style=flat-square)
+![Badge](https://img.shields.io/badge/Docker-Integration-green?style=flat-square)
+![Badge](https://img.shields.io/badge/Trivy-VulnScan-orange?style=flat-square)
+![Badge](https://img.shields.io/badge/nuclei-CVE--Analysis-critical?style=flat-square)
+
+> 🛡️ **보안 전문가를 위한 자동화된 포트 기반 서비스 식별 & 취약점 분석 시스템**  
+> Docker 기반 서비스 식별, 취약점(CVE) 분석, EPSS 위험도 분류, 웹 서비스 식별, 리포트 자동화까지 한 번에!
 
 ---
 
-## 🛡️ 주요 기능
+## 📦 기능 요약
 
-| 기능 | 설명 |
-|------|------|
-| ✅ 포트 스캔 | 병렬로 빠르게 TCP 포트 스캔 (1–1024) |
-| ✅ 위험 포트 탐지 | SMB, RDP, FTP 등 고위험 포트 자동 식별 |
-| ✅ 조합 기반 위험 탐지 | HTTP+HTTPS, FTP+SMB 등 이상 조합 경고 |
-| ✅ CVE 연계 | Shodan API + EPSS API 기반 고위험 취약점 경고 |
-| ✅ 웹 서비스 스크린샷 | Selenium으로 실시간 웹 페이지 캡처 |
-| ✅ 민감 자산 탐지 | Redis, MongoDB, Elasticsearch 외부 노출 경고 |
-| ✅ 인증 우회 감지 | Redis 등 인증 없이 접속 가능한 자산 실시간 탐지 |
+### ✅ 서비스 식별 자동화
+- 🔎 `docker ps` + `docker inspect` → 포트별 Docker 이미지, 서비스 자동 매핑
+- 🧠 이미지명, Entrypoint, Cmd, Label 기반 **서비스명 추론 알고리즘 내장**
 
----
+### ✅ 취약점 진단
+- 🧪 [Trivy](https://github.com/aquasecurity/trivy) 기반 Docker 이미지 취약점 스캔
+- 🧨 [nuclei](https://github.com/projectdiscovery/nuclei) 기반 CVE 탐지 및 EPSS 위험도 분석
+- 📊 고위험(≥ 0.7), 중간(≥ 0.4), 저위험(< 0.4) 자동 분류 및 대응 가이드 생성
 
-## 🖥️ 실행 화면
+### ✅ 포트 스캐닝 & 선택적 진단
+- 🌐 `전체 포트(1~1024)` 또는 `선택 프로토콜 기반` 스캔 지원
+- 🧩 FTP, SSH, HTTP, DNS, Redis, MongoDB, Jenkins, Elasticsearch 등 30+ 프로토콜 지원
+- ⚡ 추후 Half-Open(반개방형) 스캔 모드 지원 예정
 
-| 📊 전체 리포트 | 🌐 웹 서비스 스크린샷 |
-|----------------|------------------------|
+### ✅ 웹 서비스 정보 수집
+- 🖼️ 웹 페이지 **타이틀 / 서버 / 스크린샷** 자동 수집
+- 📷 `selenium` 기반 캡처 기능 포함
 
-> 🔐 리포트 예시: "Redis 인증 없이 접속 가능합니다. 즉시 차단 필요"
-
----
-
-## ⚙️ 사용 기술
-
-- `Python 3.10`
-- `Flask` - 웹 UI
-- `Selenium` - 웹 서비스 캡처
-- `requests`, `socket`, `ThreadPoolExecutor`
-- `Docker` (Redis/Mongo 테스트용)
+### ✅ UI 및 리포트
+- 🖥️ `Flask` 웹 대시보드 기반 직관적 결과 확인
+- 📄 취약점 수, 서비스 매핑, Docker 이미지별 상세 분석 제공
+- 📥 TXT 다운로드 및 CVE 상세 페이지 연동
 
 ---
 
+## 🛠️ 설치 및 실행
+
+```bash
+git clone https://github.com/yourname/port-scanner.git
+cd port-scanner
+
+# Python 패키지 설치
+pip install -r requirements.txt
+
+# 실행
+python app.py
+```
+
+🌐 주요 기술 스택
+Python 3.10
+
+Flask
+
+Docker
+
+Trivy
+
+nuclei + EPSS API
+
+Selenium
+
+BeautifulSoup
+
+📁 폴더 구조
+
+port-scanner/
+├── app.py                      # 메인 플라스크 서버
+├── docker_helper.py           # Docker 이미지 → 서비스 추론 로직
+├── trivy_helper.py            # Trivy 취약점 검사 모듈
+├── scanners/                  # 프로토콜별 스캐너 모음
+├── templates/                 # HTML 결과 템플릿
+├── static/captures/           # 웹 서비스 스크린샷 저장
+├── trivy_reports/             # Trivy 분석 JSON 리포트 저장
+└── README.md
