@@ -68,7 +68,7 @@ BeautifulSoup
 
 📁 폴더 구조
 
-port-scanner/
+port-scanner/  
 ├── app.py                      # 메인 플라스크 서버   
 ├── docker_helper.py           # Docker 이미지 → 서비스 추론 로직  
 ├── trivy_helper.py            # Trivy 취약점 검사 모듈  
