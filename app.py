@@ -381,6 +381,7 @@ def custom_scan():
         'ssh': ajs.scan_ssh,
         'http': ajs.scan_http,
         'https': ajs.scan_https,
+        'telnet': ajs.scan_telnet,
         'dns': ajs.scan_dns,
         'pop3': sol.pop3_port_scan,
         'imap': sol.imap_port_scan,

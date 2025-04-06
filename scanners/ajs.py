@@ -3,6 +3,17 @@ import socket
 from contextlib import closing
 
 TIMEOUT = 3
+def scan_telnet(ip):
+    port = 23
+    try:
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+            sock.settimeout(TIMEOUT)
+            sock.connect((ip, port))
+            response = sock.recv(1024).decode(errors='ignore')
+            return {'protocol': 'telnet', 'port': port, 'status': 'open', 'banner': response.strip()}
+    except Exception as e:
+        return {'protocol': 'telnet', 'port': port, 'status': 'closed', 'message': str(e)}
+
 
 def scan_ftp(ip):
     port = 21
