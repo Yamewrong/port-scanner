@@ -1,28 +1,59 @@
 import subprocess
+import json
 import re
+
+SERVICE_KEYWORDS = {
+    'tomcat': ['tomcat'],
+    'jenkins': ['jenkins'],
+    'gitlab': ['gitlab'],
+    'mysql': ['mysql'],
+    'postgres': ['postgres', 'pgsql'],
+    'mongodb': ['mongo'],
+    'redis': ['redis'],
+    'elasticsearch': ['elasticsearch'],
+    'kibana': ['kibana'],
+    'zookeeper': ['zookeeper'],
+    'consul': ['consul'],
+    'etcd': ['etcd'],
+    'vnc': ['vnc'],
+    'ftp': ['ftp'],
+    'ssh': ['ssh'],
+    'nginx': ['nginx'],
+    'apache': ['apache', 'httpd'],
+    'docker': ['docker'],
+    'kubernetes': ['k8s', 'kubernetes']
+}
+
+def detect_service_from_metadata(image, cmd, labels):
+    text_pool = f"{image} {cmd} {json.dumps(labels)}".lower()
+    for service, keywords in SERVICE_KEYWORDS.items():
+        if any(keyword in text_pool for keyword in keywords):
+            return service
+    return 'unknown'
+
 def get_docker_port_image_map():
-    docker_ports = {}
+    docker_map = {}
     try:
-        output = subprocess.check_output(
-            ['docker', 'ps', '--format', '{{.Image}} {{.Ports}}'],
-            stderr=subprocess.STDOUT
-        )
-        lines = output.decode().splitlines()
-        for line in lines:
-            if '->' in line:
-                parts = line.split()
-                image = parts[0]
-                for part in parts[1:]:
-                    if '->' in part:
-                        try:
-                            host_port = int(part.split('->')[0].split(':')[-1])
-                            docker_ports[host_port] = image
-                        except ValueError:
-                            continue  # 포트 파싱 실패 시 무시
-    except subprocess.CalledProcessError as e:
-        print("[WARN] docker ps 명령 실패. 도커 환경 아님일 수 있음:", e.output.decode())
-    except FileNotFoundError:
-        print("[WARN] docker 명령어를 찾을 수 없습니다. 도커가 설치되어 있지 않거나 PATH에 없습니다.")
+        output = subprocess.check_output(['docker', 'ps', '-q'], stderr=subprocess.STDOUT)
+        container_ids = output.decode().splitlines()
+
+        for cid in container_ids:
+            inspect = subprocess.check_output(['docker', 'inspect', cid])
+            info = json.loads(inspect)[0]
+
+            image = info.get("Config", {}).get("Image", "")
+            cmd = " ".join(info.get("Config", {}).get("Cmd", []))
+            labels = info.get("Config", {}).get("Labels", {})
+            ports = info.get("NetworkSettings", {}).get("Ports", {})
+
+            service = detect_service_from_metadata(image, cmd, labels)
+
+            for container_port, bindings in ports.items():
+                if bindings:
+                    for b in bindings:
+                        host_port = int(b.get("HostPort", 0))
+                        docker_map[host_port] = (image, service)
     except Exception as e:
-        print(f"[WARN] Docker 정보 수집 중 예외 발생: {e}")
-    return docker_ports
+        print(f"[WARN] 도커 포트 매핑 오류: {e}")
+
+    return docker_map

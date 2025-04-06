@@ -1,10 +1,13 @@
 import subprocess
 import os
 import json
-
+REPORT_DIR = "trivy_reports"
 
 def scan_with_trivy(image_name):
-    output_file = f"trivy_{image_name.replace(':', '_')}.json"
+    os.makedirs(REPORT_DIR, exist_ok=True)
+    safe_name = image_name.replace(":", "_").replace("/", "_")
+    output_file = os.path.join(REPORT_DIR, f"{safe_name}.json")
+
     subprocess.run([
         "trivy", "image", image_name,
         "--format", "json", "-o", output_file
@@ -15,6 +18,7 @@ def scan_with_trivy(image_name):
 
     with open(output_file, encoding='utf-8') as f:
         data = json.load(f)
+
 
     vulns = []
     for result in data.get("Results", []):
@@ -43,4 +47,5 @@ def scan_with_trivy(image_name):
                 "Guideline": guideline
             })
     return vulns
+    print(f"[Trivy] {image_name} 분석 완료 → 취약점 {len(vulns)}개 발견")
 

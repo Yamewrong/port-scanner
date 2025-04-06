@@ -112,7 +112,10 @@
                     📡 스캔 프로토콜: <strong>{{ entry.protocol|upper if entry.protocol else 'UNKNOWN' }}</strong>
                 </div>
                 <div class="protocol-port">
-                    📍 포트: <code>{{ entry.port }}</code> — 
+                    📍 포트: <code>{{ entry.port }}</code>
+                    {% if entry.service_name and entry.service_name != "Unknown" %}
+                        ({{ entry.service_name }})
+                    {% endif %} —
                     {% if entry.status == 'open' %}
                         <span style="color: #00e676">열림</span>
                     {% elif entry.status == 'closed' %}
@@ -141,7 +144,9 @@
                 {% if entry.banner %}
                 <div class="protocol-msg">💬 배너 정보: {{ entry.banner }}</div>
                 {% endif %}
-
+                {% if entry.service_guess %}
+                <div class="protocol-msg">🧠 서비스 추정: {{ entry.service_guess }}</div>
+                {% endif %}
                 {% if entry.response %}
                 <div class="protocol-msg">📥 응답 메시지: {{ entry.response }}</div>
                 {% endif %}

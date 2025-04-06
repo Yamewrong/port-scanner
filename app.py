@@ -3,9 +3,10 @@ import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from screenshot_utils import capture_web_info
 from docker_helper import get_docker_port_image_map
+from infer_service_from_image import infer_service_from_image
 from trivy_helper import scan_with_trivy
 import re
-
+import json
 import requests
 import io
 import time
@@ -213,21 +214,41 @@ def index():
     return render_template('index.html')
 
 def enrich_with_trivy(ip, results):
-    docker_map = get_docker_port_image_map()
+    docker_map = get_docker_port_image_map() if ip in ['127.0.0.1', 'localhost'] else {}
+
     for r in results:
         port = r['port']
+
+        # ✅ Docker 포트에 대해만 enrich 수행
         if port in docker_map:
-            image_name = docker_map[port]
-            print(f"[DEBUG] 포트 {port} → Docker 이미지: {image_name}")
+            image_name, service_name = docker_map[port]
+            print(f"[DEBUG] 포트 {port} → Docker 이미지: {image_name}, 서비스: {service_name}")
+
             r['docker_image'] = image_name
+            r['service_name'] = service_name or infer_service_from_image(image_name)  # fallback 지원
+
             try:
-                r['trivy_vulns'] = scan_with_trivy(image_name)
-                docker_vuln_results[image_name] = r['trivy_vulns']  # 상세 페이지용 저장
+                safe_name = image_name.replace('/', '_').replace(':', '_')
+                output_file = f"trivy_reports/{safe_name}.json"
+
+                # ✅ Trivy 스캔 또는 캐시된 JSON 로드
+                if not os.path.exists(output_file):
+                    r['trivy_vulns'] = scan_with_trivy(image_name)
+                else:
+                    with open(output_file, encoding='utf-8') as f:
+                        existing = json.load(f)
+                    r['trivy_vulns'] = [
+                        vuln
+                        for result in existing.get("Results", [])
+                        for vuln in result.get("Vulnerabilities", [])
+                    ]
             except Exception as e:
                 print(f"[ERROR] Trivy 실행 실패: {e}")
                 r['trivy_vulns'] = []
         else:
             print(f"[DEBUG] 포트 {port} → Docker 매핑 없음")
+            r['service_name'] = None
+
 
 def generate_guideline(vuln):
     pkg = vuln.get("PkgName")
@@ -363,6 +384,7 @@ def scan():
 
 @app.route('/customscan', methods=['POST'])
 @app.route('/customscan', methods=['POST'])
+@app.route('/customscan', methods=['POST'])
 def custom_scan():
     target = request.form.get('target', '').strip()
     selected_protocols = request.form.getlist('protocols')
@@ -375,7 +397,7 @@ def custom_scan():
     if not ip:
         return render_template('index.html', error="도메인 또는 IP를 확인할 수 없습니다.")
 
-    # ✅ scanner_map은 먼저 선언
+    # 1️⃣ scanner_map 먼저 선언
     scanner_map = {
         'ftp': ajs.scan_ftp,
         'ssh': ajs.scan_ssh,
@@ -408,20 +430,23 @@ def custom_scan():
         'zookeeper': cj.zookeeper_port_scan
     }
 
-    # ✅ 결과 수집
+    # 2️⃣ 포트 스캔 수행
     results = []
     for proto in selected_protocols:
         func = scanner_map.get(proto)
         if func:
-            results.append(func(ip))  # target 대신 ip 사용하면 더 일관됨
+            results.append(func(ip))
 
-    # ✅ Docker 포트 정보 추출
+    # 3️⃣ Trivy 기반 docker_image 정보 먼저 enrich
+    enrich_with_trivy(ip, results)
+
+    # 4️⃣ Docker 포트 → 이미지 매핑
     docker_ports_info = {}
     for entry in results:
-        if 'docker_image' in entry and entry['docker_image']:
+        if entry.get('docker_image'):
             docker_ports_info[entry['port']] = entry['docker_image']
 
-    # ✅ 이후 분석 및 렌더링
+    # 5️⃣ 분석 및 리포트 구성
     open_ports = [r['port'] for r in results if r['status'] == 'open']
     scan_time = round(time.time() - start_time, 2)
 
@@ -447,43 +472,52 @@ def custom_scan():
         'cve_warnings': cve_warnings,
         'cve_guidelines': cve_guidelines,
         'web_infos': web_infos,
-        'docker_ports_info': docker_ports_info   # ✅ 유지됨!
+        'docker_ports_info': docker_ports_info
     }
 
-    enrich_with_trivy(ip, results)
     return render_template('result.html', result=last_scan_result)
 
-# 전역 저장소
-docker_vuln_results = {}
 
-@app.route('/docker_vulns/<image>')
-def docker_vulns(image):
-    vulns = docker_vuln_results.get(image)
-    if not vulns:
-        return render_template('404.html', msg='해당 이미지에 대한 취약점 정보가 없습니다.')
+@app.route('/docker_vulns/<path:image_name>')
+def docker_vulns(image_name):
+    safe_name = image_name.replace('/', '_').replace(':', '_')
+    report_dir = "trivy_reports"
+    filepath = os.path.join(report_dir, f"{safe_name}.json")
 
-    # 필터 처리
+    if not os.path.exists(filepath):
+        return f"{safe_name}.json 파일이 없습니다. Trivy 리포트가 저장되지 않았거나 경로가 잘못되었을 수 있습니다.", 404
+
+    with open(filepath, encoding='utf-8') as f:
+        data = json.load(f)
+
+    # Trivy 결과에서 취약점만 추출
+    all_vulns = []
+    for result in data.get("Results", []):
+        for vuln in result.get("Vulnerabilities", []):
+            vuln['Guideline'] = generate_guideline(vuln)
+            all_vulns.append(vuln)
+
+    # 필터링
     severity = request.args.get('severity')
     if severity:
-        vulns = [v for v in vulns if v['Severity'].lower() == severity.lower()]
+        all_vulns = [v for v in all_vulns if v.get('Severity', '').lower() == severity.lower()]
 
-    # 페이지네이션 처리
+    # 페이지네이션
     page = int(request.args.get('page', 1))
     per_page = 10
-    total_pages = (len(vulns) + per_page - 1) // per_page
+    total_pages = (len(all_vulns) + per_page - 1) // per_page
     start = (page - 1) * per_page
     end = start + per_page
-    paginated_vulns = vulns[start:end]
+    paginated_vulns = all_vulns[start:end]
 
     return render_template(
         'docker_vulns.html',
-        image=image,
+        image=image_name,
         vulns=paginated_vulns,
         page=page,
         total_pages=total_pages,
         severity=severity
     )
-
 
 
 
