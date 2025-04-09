@@ -4,12 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>포트 스캐너</title>
-
-    <!-- Bootstrap -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Pretendard -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css">
-
     <style>
         body {
             background-color: #121212;
@@ -17,8 +13,9 @@
             font-family: 'Pretendard', sans-serif;
         }
         .container {
-            max-width: 600px;
-            margin-top: 60px;
+            width: 90%;
+            max-width: 960px;
+            margin: 60px auto;
         }
         .card {
             background-color: #1f1f1f;
@@ -87,34 +84,102 @@
                 스캔할 IP 주소 또는 도메인을 입력하세요 (포트 범위: 1–1024 또는 선택한 프로토콜)<br>
                 <strong style="color: #ff7675;">※ 허가받은 시스템만 스캔하세요.</strong>
             </p>
+
             {% if error %}
             <div class="alert alert-danger">{{ error }}</div>
             {% endif %}
-            <form method="POST" action="/scan">
+
+            <!-- 입력: 도메인 / Docker 공통 체크박스 -->
+            <div class="mb-3">
+                <label for="target" class="form-label">대상 IP / 도메인</label>
+                <input type="text" class="form-control" id="target" name="target"
+                       placeholder="예: 192.168.0.1 또는 example.com" required>
+                <div class="form-text">예시: 192.168.1.1 또는 google.com</div>
+            </div>
+            <div class="form-check mb-4">
+                <input class="form-check-input" type="checkbox" id="is_docker_input">
+                <label class="form-check-label" for="is_docker_input">Docker 기반입니다</label>
+            </div>
+            <!-- Ansible Docker 확인 -->
+            <form method="POST" action="/check_docker" enctype="multipart/form-data" class="mb-4">
+                <h5 class="text-info">🐳 원격 서버 Docker 환경 확인</h5>
+
                 <div class="mb-3">
-                    <label for="target" class="form-label">대상 IP / 도메인</label>
-                    <input type="text" class="form-control" id="target" name="target" placeholder="예: 192.168.0.1 또는 example.com" required>
-                    <div class="form-text">예시: 192.168.1.1 또는 google.com</div>
+                    <label for="pem_file" class="form-label">PEM 키 업로드</label>
+                    <input type="file" class="form-control" name="pem_file" accept=".pem" required>
                 </div>
+
+                <div class="mb-3">
+                    <label for="remote_ip" class="form-label">원격 서버 IP</label>
+                    <input type="text" class="form-control" name="remote_ip" placeholder="예: 3.35.xxx.xxx" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="remote_user" class="form-label">접속 사용자명</label>
+                    <input type="text" class="form-control" name="remote_user" placeholder="예: ubuntu 또는 ec2-user" required>
+                </div>
+
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-secondary">🔍 Docker 설치 여부 확인</button>
+                </div>
+
+                {% if docker_result %}
+                <div class="alert alert-info mt-3">{{ docker_result }}</div>
+                {% endif %}
+            </form>
+            <!-- Ansible Docker 이미지 취약점 스캔 -->
+            <form method="POST" action="/scan_image" enctype="multipart/form-data" class="mb-4">
+                <h5 class="text-warning">🛡️ 원격 Docker 이미지 취약점 검사 (Trivy)</h5>
+
+                <div class="mb-3">
+                    <label for="docker_image" class="form-label">도커 이미지 이름</label>
+                    <input type="text" class="form-control" name="docker_image" placeholder="예: nginx:latest" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="pem_file_image" class="form-label">PEM 키 업로드</label>
+                    <input type="file" class="form-control" name="pem_file" accept=".pem" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="remote_ip_image" class="form-label">원격 서버 IP</label>
+                    <input type="text" class="form-control" name="remote_ip" placeholder="예: 3.35.xxx.xxx" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="remote_user_image" class="form-label">접속 사용자명</label>
+                    <input type="text" class="form-control" name="remote_user" placeholder="예: ubuntu 또는 ec2-user" required>
+                </div>
+
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-warning">🔎 Trivy로 이미지 검사</button>
+                </div>
+
+                {% if trivy_result %}
+                <div class="alert alert-info mt-3" style="white-space: pre-wrap;">{{ trivy_result }}</div>
+                {% endif %}
+            </form>
+
+            <!-- 기본 포트 스캔 -->
+            <form method="POST" action="/scan">
+                <input type="hidden" name="target" id="scan-target">
+                <input type="hidden" name="is_docker" id="scan-docker">
                 <div class="d-grid">
                     <button type="submit" class="btn btn-primary">기본 포트 스캔</button>
                 </div>
             </form>
 
-            <form method="POST" action="/fullscan" class="mt-3">
-                <input type="hidden" name="target" id="fullscan-target">
-                <div class="d-grid">
-                    <button type="submit" class="btn btn-secondary">프로토콜 기반 전체 스캔</button>
-                </div>
-            </form>
-
+            <!-- 선택된 프로토콜 스캔 -->
             <form method="POST" action="/customscan" class="mt-4">
                 <input type="hidden" name="target" id="customscan-target">
+                <input type="hidden" name="is_docker" id="customscan-docker">
+
                 <label class="form-label">검사할 프로토콜을 선택하세요:</label>
                 <div class="form-check mb-2">
                     <input class="form-check-input" type="checkbox" id="select-all">
                     <label class="form-check-label" for="select-all">전체 선택 / 해제</label>
                 </div>
+
                 <div class="row row-cols-2">
                     {% set protocols = [
                         'ftp', 'ssh', 'telnet', 'smtp', 'dns', 'http', 'pop3', 'ntp',
@@ -124,7 +189,8 @@
                         'oracle', 'elasticsearch', 'zookeeper'] %}
                     {% for protocol in protocols %}
                     <div class="form-check col">
-                        <input class="form-check-input protocol-checkbox" type="checkbox" name="protocols" value="{{ protocol }}" id="{{ protocol }}">
+                        <input class="form-check-input protocol-checkbox" type="checkbox" name="protocols"
+                               value="{{ protocol }}" id="{{ protocol }}">
                         <label class="form-check-label" for="{{ protocol }}">{{ protocol|upper }}</label>
                     </div>
                     {% endfor %}
@@ -149,15 +215,18 @@
 <script>
     const forms = document.querySelectorAll("form");
     const loading = document.getElementById("loading");
+
     forms.forEach(form => {
         form.addEventListener("submit", function () {
             loading.style.display = "block";
-            const targetInput = document.getElementById("target");
-            if (targetInput) {
-                const ip = targetInput.value;
-                document.getElementById("fullscan-target").value = ip;
-                document.getElementById("customscan-target").value = ip;
-            }
+            const ip = document.getElementById("target").value;
+            const isDocker = document.getElementById("is_docker_input").checked;
+
+            // ✅ hidden input에 value로 직접 전달
+            document.getElementById("scan-target").value = ip;
+            document.getElementById("customscan-target").value = ip;
+            document.getElementById("scan-docker").value = isDocker ? 'on' : '';
+            document.getElementById("customscan-docker").value = isDocker ? 'on' : '';
         });
     });
 
@@ -167,5 +236,6 @@
         protocolCheckboxes.forEach(cb => cb.checked = selectAll.checked);
     });
 </script>
+
 </body>
 </html>

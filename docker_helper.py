@@ -25,11 +25,18 @@ SERVICE_KEYWORDS = {
 }
 
 def detect_service_from_metadata(image, cmd, labels):
-    text_pool = f"{image} {cmd} {json.dumps(labels)}".lower()
+    try:
+        text_pool = f"{image} {cmd} {json.dumps(labels)}".lower()
+    except Exception as e:
+        print(f"[WARN] 서비스 추정 중 텍스트 풀 생성 실패: {e}")
+        return 'unknown'
+
     for service, keywords in SERVICE_KEYWORDS.items():
         if any(keyword in text_pool for keyword in keywords):
             return service
+
     return 'unknown'
+
 
 def get_docker_port_image_map():
     docker_map = {}
@@ -51,9 +58,14 @@ def get_docker_port_image_map():
             for container_port, bindings in ports.items():
                 if bindings:
                     for b in bindings:
-                        host_port = int(b.get("HostPort", 0))
-                        docker_map[host_port] = (image, service)
+                        try:
+                            host_port = int(b.get("HostPort", 0))
+                            if host_port > 0:
+                                docker_map[host_port] = (image, service)
+                        except (ValueError, TypeError) as e:
+                            print(f"[WARN] 호스트 포트 파싱 실패: {b} / 오류: {e}")
     except Exception as e:
         print(f"[WARN] 도커 포트 매핑 오류: {e}")
 
     return docker_map
+

@@ -1,10 +1,14 @@
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, redirect
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from screenshot_utils import capture_web_info
 from docker_helper import get_docker_port_image_map
 from infer_service_from_image import infer_service_from_image
 from trivy_helper import scan_with_trivy
+from external_helper import guess_service_from_banner
+from werkzeug.utils import secure_filename
+from ansible_helper import check_docker_installed
+from ansible_helper import scan_docker_image_with_trivy, parse_trivy_output
 import re
 import json
 import requests
@@ -143,7 +147,24 @@ def remove_ansi(text):
 def sanitize_cve_lines(cve_lines):
     return [remove_ansi(line) for line in cve_lines]
 
+@app.route('/check_docker', methods=['POST'])
+def check_docker():
+    pem_file = request.files.get('pem_file')
+    remote_ip = request.form.get('remote_ip', '').strip()
+    remote_user = request.form.get('remote_user', '').strip()
 
+    if not pem_file or not remote_ip or not remote_user:
+        return render_template('index.html', error="모든 정보를 입력해 주세요.")
+
+    try:
+        pem_content = pem_file.read().decode('utf-8')
+        is_installed = check_docker_installed(remote_ip, remote_user, pem_content)
+        message = f"✅ Docker가 설치되어 있습니다." if is_installed else "❌ Docker가 설치되어 있지 않습니다."
+    except Exception as e:
+        print(f"[ERROR] Docker 확인 중 문제 발생: {e}")
+        message = "⚠️ Docker 확인 중 오류가 발생했습니다."
+
+    return render_template('index.html', docker_result=message)
 
 def check_port(ip, port):
     try:
@@ -213,25 +234,28 @@ def detect_unauthorized_access(ip, open_ports):
 def index():
     return render_template('index.html')
 
-def enrich_with_trivy(ip, results):
-    docker_map = get_docker_port_image_map() if ip in ['127.0.0.1', 'localhost'] else {}
+def enrich_with_trivy(ip, results, is_docker=True):
+    if not is_docker:
+        print("[INFO] 사용자 선택에 따라 Docker 기반 분석을 건너뜁니다.")
+        return
+
+    # 🔁 도커 정보 로드 (is_docker=True면 무조건)
+    docker_map = get_docker_port_image_map() if is_docker else {}
 
     for r in results:
         port = r['port']
 
-        # ✅ Docker 포트에 대해만 enrich 수행
         if port in docker_map:
             image_name, service_name = docker_map[port]
             print(f"[DEBUG] 포트 {port} → Docker 이미지: {image_name}, 서비스: {service_name}")
 
             r['docker_image'] = image_name
-            r['service_name'] = service_name or infer_service_from_image(image_name)  # fallback 지원
+            r['service_name'] = service_name or infer_service_from_image(image_name)
 
             try:
                 safe_name = image_name.replace('/', '_').replace(':', '_')
                 output_file = f"trivy_reports/{safe_name}.json"
 
-                # ✅ Trivy 스캔 또는 캐시된 JSON 로드
                 if not os.path.exists(output_file):
                     r['trivy_vulns'] = scan_with_trivy(image_name)
                 else:
@@ -247,7 +271,18 @@ def enrich_with_trivy(ip, results):
                 r['trivy_vulns'] = []
         else:
             print(f"[DEBUG] 포트 {port} → Docker 매핑 없음")
-            r['service_name'] = None
+            if not is_docker:
+                from external_helper import guess_service_from_banner
+                r['service_name'] = guess_service_from_banner(r)
+            else:
+                r['service_name'] = None
+
+        # ✅ 디버깅 로그 출력 (반드시 루프 안에 있어야 함!)
+        print(f"[DEBUG] docker_image for port {port}: {r.get('docker_image')}")
+        print(f"[DEBUG] trivy_vulns count: {len(r.get('trivy_vulns', []))}")
+
+
+
 
 
 def generate_guideline(vuln):
@@ -321,11 +356,63 @@ def generate_cve_guidelines(cve_lines):
     return guidelines
 
 
+@app.route("/scan_image", methods=["POST"])
+def scan_image():
+    remote_ip = request.form.get("remote_ip")
+    remote_user = request.form.get("remote_user")
+    image_name = request.form.get("docker_image")
+    pem_file = request.files.get("pem_file")
 
+    if not (remote_ip and remote_user and image_name and pem_file):
+        return render_template("index.html", error="모든 입력 항목을 채워주세요.")
+
+    pem_content = pem_file.read().decode("utf-8")
+    from ansible_helper import scan_docker_image_with_trivy
+    result = scan_docker_image_with_trivy(remote_ip, remote_user, pem_content, image_name)
+
+    return render_template("index.html", docker_result="✅ Trivy 결과:\n" + result if result else "❌ 실패 또는 취약점 없음")
+@app.route('/scan_trivy_image', methods=['POST'])
+def scan_trivy_image():
+    from ansible_helper import scan_docker_image_with_trivy
+
+    image = request.form.get('docker_image')
+    ip = request.form.get('remote_ip')
+    username = request.form.get('remote_user')
+    pem_file = request.files.get('pem_file')
+
+    if not (image and ip and username and pem_file):
+        return render_template('index.html', error='모든 값을 입력해주세요.')
+
+    pem_content = pem_file.read().decode('utf-8')
+    trivy_output = scan_docker_image_with_trivy(ip, username, pem_content, image)
+
+    return render_template('result.html', trivy_output=trivy_output)
+trivy_raw = scan_docker_image_with_trivy(ip, user, pem, image)
+trivy_parsed = parse_trivy_output(trivy_raw)
 @app.route('/scan', methods=['POST'])
 def scan():
     target = request.form.get('target', '').strip()
     ip = resolve_domain(target)
+
+    # 🔐 SSH 관련 항목들
+    pem_file = request.files.get('pem_file')
+    ssh_user = request.form.get('ssh_user', '').strip()
+
+    # 기본적으로는 form 체크박스
+    is_docker = request.form.get('is_docker') == 'on'
+
+    # ✅ pem 키가 올라왔으면 ansible로 docker 여부 판단 시도
+    if pem_file and ssh_user and ip:
+        pem_path = f"/tmp/{time.time()}_temp.pem"
+        pem_file.save(pem_path)
+        try:
+            is_docker = check_docker_installed(ip, ssh_user, pem_path)
+            print(f"[INFO] Ansible 통해 Docker 설치 여부 확인 결과: {is_docker}")
+        except Exception as e:
+            print(f"[ERROR] Ansible 체크 실패: {e}")
+        finally:
+            os.remove(pem_path)
+
     if not ip:
         return render_template('index.html', error="도메인 또는 IP를 확인할 수 없습니다.")
 
@@ -333,7 +420,6 @@ def scan():
     open_ports = []
     scan_results = []
     start_time = time.time()
-    scan_time = 0
 
     try:
         with ThreadPoolExecutor(max_workers=100) as executor:
@@ -345,6 +431,7 @@ def scan():
                     open_ports.append(result['port'])
     except Exception as e:
         return render_template('index.html', error=str(e))
+
     scan_results.sort(key=lambda x: x['port'])
     analyze_vulnerabilities(scan_results)
     warnings = analyze_risks(open_ports)
@@ -366,29 +453,35 @@ def scan():
     warnings += detect_asset_exposure(open_ports)
     warnings += detect_unauthorized_access(ip, open_ports)
     web_infos = capture_web_info(target)
+
     global last_scan_result
     last_scan_result = {
         'ip': ip,
         'hostname': target,
         'ports': open_ports,
-        'scan_time': scan_time,
+        'scan_time': round(time.time() - start_time, 2),
         'results': scan_results,
         'warnings': warnings,
         'cve_warnings': cve_warnings,
         'cve_guidelines': cve_guidelines,
-        'web_infos': web_infos
+        'web_infos': web_infos,
+        'is_docker': is_docker  # ✅ 최종 반영된 도커 여부
     }
-    enrich_with_trivy(ip, scan_results)
+
+    enrich_with_trivy(ip, scan_results, is_docker)
 
     return render_template('result.html', result=last_scan_result)
 
-@app.route('/customscan', methods=['POST'])
-@app.route('/customscan', methods=['POST'])
+
 @app.route('/customscan', methods=['POST'])
 def custom_scan():
     target = request.form.get('target', '').strip()
     selected_protocols = request.form.getlist('protocols')
-    start_time = time.time()
+    is_docker = request.form.get('is_docker') == 'on'
+
+    # 🔐 SSH용 정보 받기
+    pem_file = request.files.get('pem_file')
+    ssh_user = request.form.get('ssh_user', '').strip()
 
     if not target or not selected_protocols:
         return render_template('index.html', error="대상 IP와 프로토콜을 선택하세요.")
@@ -396,6 +489,21 @@ def custom_scan():
     ip = resolve_domain(target)
     if not ip:
         return render_template('index.html', error="도메인 또는 IP를 확인할 수 없습니다.")
+
+    # ✅ PEM 키 있으면 Ansible로 Docker 여부 확인
+    if pem_file and ssh_user:
+        pem_path = f"/tmp/{time.time()}_temp.pem"
+        pem_file.save(pem_path)
+        try:
+            from ansible_helper import check_docker_installed
+            is_docker = check_docker_installed(ip, ssh_user, pem_path)
+            print(f"[INFO] Ansible 통해 Docker 설치 여부 확인 결과: {is_docker}")
+        except Exception as e:
+            print(f"[ERROR] Ansible 체크 실패: {e}")
+        finally:
+            os.remove(pem_path)
+
+    start_time = time.time()
 
     # 1️⃣ scanner_map 먼저 선언
     scanner_map = {
@@ -437,8 +545,8 @@ def custom_scan():
         if func:
             results.append(func(ip))
 
-    # 3️⃣ Trivy 기반 docker_image 정보 먼저 enrich
-    enrich_with_trivy(ip, results)
+    # 3️⃣ Trivy 기반 docker_image 정보 enrich
+    enrich_with_trivy(ip, results, is_docker)
 
     # 4️⃣ Docker 포트 → 이미지 매핑
     docker_ports_info = {}
@@ -472,11 +580,11 @@ def custom_scan():
         'cve_warnings': cve_warnings,
         'cve_guidelines': cve_guidelines,
         'web_infos': web_infos,
-        'docker_ports_info': docker_ports_info
+        'docker_ports_info': docker_ports_info,
+        'is_docker': is_docker
     }
 
     return render_template('result.html', result=last_scan_result)
-
 
 @app.route('/docker_vulns/<path:image_name>')
 def docker_vulns(image_name):

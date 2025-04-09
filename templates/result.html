@@ -7,7 +7,11 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css">
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: 'Pretendard', sans-serif; }
-        .container { max-width: 720px; margin-top: 60px; }
+        .container {
+            width: 90%;
+            max-width: 960px;
+            margin: 60px auto;
+        }
         .card { background-color: #1f1f1f; border: none; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3); border-radius: 12px; }
         .card-header, .card-footer { background-color: #2c2c2c; border-color: #333; border-radius: 12px 12px 0 0; }
         .card-header h4 { font-weight: 600; font-size: 1.4rem; color: #ffffff; }
@@ -100,6 +104,11 @@
                     {% endif %}
                 </div>
                 {% endfor %}
+            </div>
+            {% if trivy_output %}
+            <div class="mt-5 p-4" style="background-color: #1e1e1e; border-left: 6px solid #00b894; border-radius: 10px;">
+                <h5 style="color: #00e676;">🔍 Ansible 기반 Trivy 검사 결과</h5>
+                <pre style="white-space: pre-wrap; font-size: 0.9rem; color: #ccc;">{{ trivy_output }}</pre>
             </div>
             {% endif %}
 
