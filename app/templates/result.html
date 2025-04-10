@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>스캔 결과 보고서</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css">
+    <style>
+        body { background-color: #121212; color: #e0e0e0; font-family: 'Pretendard', sans-serif; }
+        .container {
+            width: 90%;
+            max-width: 960px;
+            margin: 60px auto;
+        }
+        .card { background-color: #1f1f1f; border: none; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3); border-radius: 12px; }
+        .card-header, .card-footer { background-color: #2c2c2c; border-color: #333; border-radius: 12px 12px 0 0; }
+        .card-header h4 { font-weight: 600; font-size: 1.4rem; color: #ffffff; }
+        .card-body { color: #d0d0d0; }
+        .protocol-entry {
+            background-color: #2a2a2a; border: 1px solid #444; border-radius: 10px;
+            padding: 12px 16px; margin-bottom: 12px;
+        }
+        .protocol-entry.open { border-left: 5px solid #00e676; }
+        .protocol-entry.closed { border-left: 5px solid #ff7675; }
+        .protocol-entry.error { border-left: 5px solid #ffa726; }
+        .protocol-name { font-size: 1rem; font-weight: bold; }
+        .protocol-port { font-size: 0.9rem; color: #999; }
+        .protocol-msg { font-size: 0.9rem; margin-top: 4px; color: #ccc; }
+        .vuln-warning { color: #ff7675; font-weight: bold; font-size: 0.9rem; }
+        .btn-back, .btn-download {
+            background-color: #00b894; color: #fff; font-weight: bold; border: none;
+            padding: 10px 20px; border-radius: 10px; margin: 8px;
+            transition: all 0.2s ease-in-out;
+        }
+        .btn-back:hover, .btn-download:hover {
+            background-color: #019874; transform: scale(1.03);
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <div class="card-header text-center">
+            <h4>🔐 {{ result.ip }}에 대한 스캔 보고서</h4>
+        </div>
+        {% if result.screenshot_path %}
+        <div class="mb-4">
+            <h5 class="text-info">🖼️ 대상 웹 페이지 스크린샷</h5>
+            <img src="{{ url_for('static', filename='screenshots/' ~ result.ip ~ '.png') }}" 
+                class="img-fluid rounded border" style="max-width:100%; border: 1px solid #444;">
+        </div>
+        {% endif %}
+        <div class="card-body">
+            <div class="mb-4">
+                <h5 class="text-info">📌 대상 정보</h5>
+                <p><strong>IP / 도메인:</strong> {{ result.ip }}</p>
+                {% if result.epss_graph %}
+                    <h5 class="text-success">📊 EPSS 점수 분포</h5>
+                    <img src="{{ url_for('static', filename=result.epss_graph) }}" class="img-fluid mb-4" />
+                {% endif %}
+                {% if result.epss_chart %}
+                    <div class="mb-4">
+                        <h5 class="text-info">📈 EPSS Top 25</h5>
+                        <img src="{{ url_for('static', filename=result.epss_chart) }}" class="img-fluid rounded border" alt="EPSS Top 25 Chart">
+                    </div>
+                {% endif %}
+                {% if result.scan_time is defined and result.scan_time > 0 %}
+                    <p><strong>스캔 시간:</strong> {{ result.scan_time }}초</p>
+                {% endif %}
+            
+                {% if result.ports is defined and result.ports|length > 0 %}
+                    <p><strong>열려 있는 포트 수:</strong> {{ result.ports|length }}개</p>
+                {% endif %}
+            
+                {% if result.selected_protocols is defined and result.selected_protocols|length > 0 %}
+                    <p><strong>선택된 프로토콜:</strong> {{ result.selected_protocols|join(', ') }}</p>
+                {% elif result.ports is defined and result.ports|length > 0 %}
+                    <p><strong>스캔 포트 범위:</strong> 1–1024 또는 전체 프로토콜</p>
+                {% endif %}
+            </div>
+
+            {% if result.warnings %}
+            <div class="mb-4 p-3" style="background-color: #2d2d1f; border-left: 6px solid #ffc107; border-radius: 10px;">
+                <h5 style="color: #ffcd38; font-weight: bold;">⚠️ 일반 보안 경고</h5>
+                <ul class="mb-0">
+                    {% for warning in result.warnings %}
+                    <li style="margin-bottom: 6px;">{{ warning }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            {% if result.shodan_info %}
+            <div class="mb-4">
+                <h5 class="text-info">🔎 Shodan 검색 결과</h5>
+                {% for entry in result.shodan_info %}
+                    <div class="p-3 mb-2" style="background-color: #1f1f1f; border-left: 4px solid #00bcd4; border-radius: 8px;">
+                        <p><strong>IP:</strong> {{ entry.ip_str }}</p>
+                        <p><strong>Port:</strong> {{ entry.port }}</p>
+                        {% if entry.data %}
+                        <p><strong>배너:</strong> <pre style="white-space: pre-wrap; font-size: 0.9rem;">{{ entry.data }}</pre></p>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% set has_valid_nuclei = result.nuclei_results | selectattr("info.severity", "ne", "error") | list %}
+
+            {% if has_valid_nuclei %}
+                <div class="mb-4">
+                    <h5 class="text-danger">💥 Nuclei 취약점 탐지 결과</h5>
+                    {% for r in has_valid_nuclei %}
+                        <div class="p-3 mb-2" style="background-color:#2c1e1e; border-left:5px solid #ff6b6b; border-radius:10px;">
+                            <p><strong>템플릿:</strong> {{ r.get("template", "N/A") }}</p>
+                            <p><strong>이름:</strong> {{ r.get("info", {}).get("name", "정보 없음") }}</p>
+                            <p><strong>심각도:</strong> {{ r.get("info", {}).get("severity", "unknown") }}</p>
+                            <p><strong>경로:</strong> {{ r.get("matched", "N/A") }}</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            {% if result.epss_scores %}
+            <div class="mb-4">
+                <h5 class="text-warning">📈 EPSS 점수 기반 위험도</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm table-dark">
+                        <thead>
+                            <tr>
+                                <th>CVE ID</th>
+                                <th>EPSS 점수</th>
+                                <th>백분위</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cve_id, info in result.epss_scores.items() %}
+                            <tr>
+                                <td>{{ cve_id }}</td>
+                                <td style="color: {% if info.epss_score > 0.7 %}#ff6b6b{% elif info.epss_score > 0.3 %}#ffa726{% else %}#00e676{% endif %}; font-weight:bold;">
+                                    {{ info.epss_score }}
+                                </td>
+                                <td>{{ (info.percentile * 100)|round(2) }}%</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if result.cve_warnings %}
+            <div class="mb-4 p-3" style="background-color: #2e1f1f; border-left: 6px solid #ff5252; border-radius: 10px;">
+                <h5 style="color: #ff5252; font-weight: bold;">🧨 CVE 취약점 경고 (EPSS 스코어 포함)</h5>
+                <ul class="mb-0">
+                    {% for cve in result.cve_warnings %}
+                    <li style="margin-bottom: 6px;">{{ cve }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            {% if result.cve_guidelines %}
+                <h5 class="mt-4 text-warning">🛠 CVE 대응 가이드라인</h5>
+                {% for cve, guide in result.cve_guidelines.items() %}
+                    <div class="p-3 my-2" style="background-color: #f1f1f1; color: #111; border-radius: 8px;">
+                        <strong>{{ cve }}</strong><br>
+                        <div style="white-space: normal;">{{ guide | safe }}</div>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
+            {% if result.web_infos %}
+            <div class="mb-4">
+                <h5 style="color:#64b5f6;">🖼️ 웹 서비스 정보</h5>
+                {% for web in result.web_infos %}
+                <div class="mb-3 p-2" style="background-color:#222; border:1px solid #444; border-radius:10px;">
+                    <p><strong>🌐 URL:</strong> {{ web.url }}</p>
+                    <p><strong>🧩 제목:</strong> {{ web.title }}</p>
+                    <p><strong>🛠 서버:</strong> {{ web.server }}</p>
+                    {% if web.image %}
+                    <img src="{{ url_for('static', filename='captures/' ~ web.image.split('/')[-1]) }}" 
+                        style="max-width: 100%; border-radius: 10px; margin-top: 10px;" />
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if trivy_output %}
+            <div class="mt-5 p-4" style="background-color: #1e1e1e; border-left: 6px solid #00b894; border-radius: 10px;">
+                <h5 style="color: #00e676;">🔍 Ansible 기반 Trivy 검사 결과</h5>
+                <pre style="white-space: pre-wrap; font-size: 0.9rem; color: #ccc;">{{ trivy_output }}</pre>
+            </div>
+            {% endif %}
+
+{#
+            {% if result.trivy_json_results|length > 0 %}
+            <div class="mt-4 p-4" style="background-color: #1e1e1e; border-left: 6px solid #00b894; border-radius: 10px;">
+                <h5 style="color: #00e676;">🛡️ Trivy 취약점 상세 결과 (JSON 기반)</h5>
+                <div class="table-responsive">
+                    <table class="table table-dark table-striped table-sm align-middle text-start">
+                        <thead>
+                            <tr>
+                                <th>CVE ID</th>
+                                <th>심각도</th>
+                                <th>패키지</th>
+                                <th>버전</th>
+                                <th>설명</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for finding in result.trivy_json_results %}
+                            <tr>
+                                <td>{{ finding.VulnerabilityID }}</td>
+                                <td>{{ finding.Severity }}</td>
+                                <td>{{ finding.PkgName }}</td>
+                                <td>{{ finding.InstalledVersion }}</td>
+                                <td>{{ finding.Description }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}#}
+
+
+
+            {% if result.results is defined and result.results|length > 0 %}
+                <h5 class="text-success mb-3">🔎 포트 스캔 결과</h5>
+                {% for entry in result.results|sort(attribute='port')|sort(attribute='status', reverse=true) %}
+                <div class="protocol-entry {{ entry.status }}">
+                    <div class="protocol-name">
+                        📡 스캔 프로토콜: <strong>{{ entry.protocol|upper if entry.protocol else 'UNKNOWN' }}</strong>
+                    </div>
+                    <div class="protocol-port">
+                        📍 포트: <code>{{ entry.port }}</code>
+                        {% if entry.service_name and entry.service_name != "Unknown" %}
+                            ({{ entry.service_name }})
+                        {% endif %} —
+                        {% if entry.status == 'open' %}
+                            <span style="color: #00e676">열림</span>
+                        {% elif entry.status == 'closed' %}
+                            <span style="color: #ff7675">닫힘</span>
+                        {% else %}
+                            <span style="color: #ffa726">오류</span>
+                        {% endif %}
+                    </div>
+
+                    {% if entry.vuln_warning %}
+                        <div class="vuln-warning">⚠️ 보안 경고: {{ entry.vuln_warning }}</div>
+
+                        {% if result.cve_guidelines %}
+                            {% for cve, guideline in result.cve_guidelines.items() %}
+                                {% if cve in entry.vuln_warning %}
+                                    <div class="p-2 mt-2" style="background-color:#1e2b2f; border-left:5px solid #00b894; border-radius:8px;">
+                                        🛠 <strong>가이드라인:</strong><br>
+                                        <span style="white-space: pre-line;">{{ guideline }}</span>
+                                    </div>
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                    {% endif %}
+
+
+                    {% if entry.banner %}
+                    <div class="protocol-msg">💬 배너 정보: {{ entry.banner }}</div>
+                    {% endif %}
+                    {% if entry.service_guess %}
+                    <div class="protocol-msg">🧠 서비스 추정: {{ entry.service_guess }}</div>
+                    {% endif %}
+                    {% if entry.response %}
+                    <div class="protocol-msg">📥 응답 메시지: {{ entry.response }}</div>
+                    {% endif %}
+
+                    {% if entry.message %}
+                    <div class="protocol-msg">⚠️ 오류 메시지: {{ entry.message }}</div>
+                    {% endif %}
+
+                    {% if entry.docker_image %}
+                    <div class="protocol-msg">
+                        🐳 <strong>Docker 이미지:</strong> {{ entry.docker_image }}
+                    </div>
+                    {% endif %}
+
+                    {% if entry.trivy_vulns %}
+                        <div class="protocol-msg" style="margin-top: 8px;">
+                            🛡️ <strong>Trivy 취약점 발견됨:</strong> {{ entry.trivy_vulns|length }}개
+                            {% if entry.docker_image %}
+                                <br>
+                                <a href="/docker_vulns/{{ entry.docker_image | urlencode }}" target="_blank" 
+                                class="btn btn-sm btn-outline-info mt-2">
+                                    🔎 {{ entry.docker_image }} 상세 페이지에서 보기 →
+                                </a>
+                            {% else %}
+                                <br><span class="text-warning">※ docker_image 없음</span>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+
+                </div>
+                {% endfor %}
+            {% endif %}
+
+        </div>
+        {% if result.docker_ports_info %}
+        <div class="mb-4">
+            <h5 style="color:#00bcd4;">🐳 Docker 포트 매핑</h5>
+            <ul class="mb-0">
+                {% for port, image in result.docker_ports_info.items() %}
+                <li>
+                    <strong>포트 {{ port }}</strong> → <code>{{ image }}</code>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <div class="card-footer text-center">
+            <a href="/" class="btn btn-back">← 다시 스캔하기</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>
