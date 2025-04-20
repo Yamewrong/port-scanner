@@ -33,7 +33,7 @@ EXTERNAL_RISK_PORTS = {
     445: "SMB", 139: "NetBIOS", 3389: "RDP", 23: "Telnet", 21: "FTP"
 }
 
-SHODAN_API_KEY = '00eHpdt1Ww1SNP73fvPMytb5xvOLPyRb'
+SHODAN_API_KEY =''
 
 def resolve_domain(target):
     try:
